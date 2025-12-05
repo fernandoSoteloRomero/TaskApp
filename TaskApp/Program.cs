@@ -1,3 +1,4 @@
+using TaskApp.Middlewares;
 using System.IdentityModel.Tokens.Jwt;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -87,6 +88,9 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 var app = builder.Build();
+
+// 1) Middleware de manejo de errores
+app.UseMiddleware<ErrorHandlerMiddleware>();
 
 // 5) Swagger en Development
 if (app.Environment.IsDevelopment())
