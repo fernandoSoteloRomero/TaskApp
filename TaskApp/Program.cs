@@ -57,6 +57,18 @@ builder.Services.AddAuthentication(options =>
   });
 // 4) Controllers + Swagger/OpenAPI
 builder.Services.AddControllers();
+
+builder.Services.AddCors(options =>
+{
+  options.AddPolicy("AllowFrontend", policy =>
+  {
+    policy.WithOrigins("http://localhost:3000")
+      .AllowAnyHeader()
+      .AllowAnyMethod()
+      .AllowCredentials();
+  });
+});
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
@@ -106,6 +118,7 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 // 6) Middleware de Auth
+app.UseCors("AllowFrontend");
 app.UseAuthentication();
 app.UseAuthorization();
 
