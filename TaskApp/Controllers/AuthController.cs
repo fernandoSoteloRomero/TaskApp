@@ -38,6 +38,8 @@ namespace TaskApp.Controllers
                 return BadRequest(result.Errors);
             }
 
+            await userManager.AddToRoleAsync(user, "User");
+
             return Ok(new { Message = "Usuario registrado exitosamente" });
         }
 
@@ -145,16 +147,31 @@ namespace TaskApp.Controllers
 
         private async Task<AuthResponseDto> GenerateTokens(ApplicationUser user)
         {
+            // 0) Leer las secciones de configuración
             var jwtSection = configuration.GetSection("JwtSettings");
             var rftSection = configuration.GetSection("RefreshTokenSettings");
 
-            // 1) ACCESS TOKEN
+            // ===============================
+            // 1) GENERAR ACCESS TOKEN (corto)
+            // ===============================
+
+            // 1.1) Preparar la clave secreta para HMAC-SHA256
             var accessKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(jwtSection["Key"]));
+                Encoding.UTF8.GetBytes(jwtSection["Key"]!));
+
+            // 1.2) Crear las credenciales de firma con el algoritmo
             var accessCreds = new SigningCredentials(
                 accessKey, SecurityAlgorithms.HmacSha256);
 
-            var accessClaims = new[]
+            // 1.3) Obtener todos los roles del usuario
+            var roles = await userManager.GetRolesAsync(user);
+
+            // 1.4) Convertir cada rol en un Claim de tipo Role
+            var roleClaims = roles
+                .Select(role => new Claim("role", role));
+
+            // 1.5) Definir los claims estándar del JWT
+            var accessClaims = new List<Claim>
             {
                 new Claim(JwtRegisteredClaimNames.Sub, user.Id),
                 new Claim(JwtRegisteredClaimNames.UniqueName, user.UserName),
@@ -162,9 +179,14 @@ namespace TaskApp.Controllers
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
             };
 
-            var accessExpires = DateTime.UtcNow
-                .AddMinutes(int.Parse(jwtSection["AccessTokenExpirationMinutes"]));
+            // 1.6) Añadir los claims de rol a la lista
+            accessClaims.AddRange(roleClaims);
 
+            // 1.7) Calcular fecha/hora de expiración
+            var accessExpires = DateTime.UtcNow
+                .AddMinutes(int.Parse(jwtSection["AccessTokenExpirationMinutes"]!));
+
+            // 1.8) Construir el token con issuer, audience, claims, expiración y firma
             var accessToken = new JwtSecurityToken(
                 issuer: jwtSection["Issuer"],
                 audience: jwtSection["Audience"],
@@ -172,25 +194,36 @@ namespace TaskApp.Controllers
                 expires: accessExpires,
                 signingCredentials: accessCreds
             );
-            var accessTokenString =
-                new JwtSecurityTokenHandler().WriteToken(accessToken);
 
-            // 2) REFRESH TOKEN (como JWT)
+            // 1.9) Serializar el token a string
+            var accessTokenString = new JwtSecurityTokenHandler()
+                .WriteToken(accessToken);
+
+
+            // =====================================
+            // 2) GENERAR REFRESH TOKEN (largo plazo)
+            // =====================================
+
+            // 2.1) Preparar la clave secreta de RefreshTokenSettings
             var refreshKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(rftSection["Key"]));
+                Encoding.UTF8.GetBytes(rftSection["Key"]!));
+
+            // 2.2) Crear credenciales de firma para el refresh token
             var refreshCreds = new SigningCredentials(
                 refreshKey, SecurityAlgorithms.HmacSha256);
 
-            // Puedes incluir sólo el sub + jti, y quizá la fecha
+            // 2.3) Definir los claims mínimos para el refresh token
             var refreshClaims = new[]
             {
                 new Claim(JwtRegisteredClaimNames.Sub, user.Id),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
             };
 
+            // 2.4) Calcular fecha/hora de expiración (días)
             var refreshExpires = DateTime.UtcNow
-                .AddDays(int.Parse(rftSection["RefreshTokenExpirationDays"]));
+                .AddDays(int.Parse(rftSection["RefreshTokenExpirationDays"]!));
 
+            // 2.5) Construir el JWT de refresh
             var refreshToken = new JwtSecurityToken(
                 issuer: rftSection["Issuer"],
                 audience: rftSection["Audience"],
@@ -198,22 +231,36 @@ namespace TaskApp.Controllers
                 expires: refreshExpires,
                 signingCredentials: refreshCreds
             );
-            var refreshTokenString =
-                new JwtSecurityTokenHandler().WriteToken(refreshToken);
 
-            // 3) Guarda el refresh-token en BD
+            // 2.6) Serializar el refresh token a string
+            var refreshTokenString = new JwtSecurityTokenHandler()
+                .WriteToken(refreshToken);
+
+
+            // ======================================
+            // 3) PERSISTIR EL REFRESH TOKEN EN BD
+            // ======================================
+
+            // 3.1) Crear la entidad EF para almacenar el token
             var rtEntity = new RefreshToken
             {
                 Token = refreshTokenString,
                 Expires = refreshExpires,
                 Created = DateTime.UtcNow,
-                CreatedByIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? string.Empty,
+                CreatedByIp = HttpContext.Connection.RemoteIpAddress
+                    ?.ToString() ?? string.Empty,
                 UserId = user.Id
             };
+
+            // 3.2) Añadir al DbContext y salvar cambios
             dbContext.RefreshTokens.Add(rtEntity);
             await dbContext.SaveChangesAsync();
 
-            // 4) Devuelve ambos
+
+            // ====================
+            // 4) DEVOLVER LOS TOKENS
+            // ====================
+
             return new AuthResponseDto
             {
                 AccessToken = accessTokenString,
