@@ -1,3 +1,4 @@
+using MapsterMapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -10,23 +11,19 @@ namespace TaskApp.Controllers
     [Route("api/[controller]")]
     [ApiController]
     [Authorize(Roles = "Admin")]
-    public class CategoriesController(ApplicationDbContext dbContext) : ControllerBase
+    public class CategoriesController(ApplicationDbContext dbContext, IMapper mapper) : ControllerBase
     {
         [HttpGet]
+        [AllowAnonymous]
         public async Task<ActionResult<IEnumerable<CategoryDto>>> GetCategories()
         {
-            var list = await dbContext.Categories.AsNoTracking()
+            var entities = await dbContext.Categories
+                .AsNoTracking()
                 .OrderBy(c => c.Name)
-                .Select(c => new CategoryDto
-                {
-                    Id = c.Id,
-                    Name = c.Name,
-                    CreatedAt = c.CreatedAt,
-                    UpdatedAt = c.UpdatedAt
-                })
                 .ToListAsync();
 
-            return Ok(list);
+            var dtos = mapper.Map<List<CategoryDto>>(entities);
+            return Ok(dtos);
         }
 
 
@@ -45,23 +42,16 @@ namespace TaskApp.Controllers
 
         // POST api/categories
         [HttpPost]
-        public async Task<ActionResult<CategoryDto>> Create(
-            [FromBody] CategoryCreateDto dto)
+        public async Task<ActionResult<CategoryDto>> Create([FromBody] CategoryCreateDto dto)
         {
             if (!ModelState.IsValid) return BadRequest(ModelState);
 
-            var entity = new Category { Name = dto.Name };
-            dbContext.Categories.Add(entity);
+            var category = mapper.Map<Category>(dto);
+
+            dbContext.Categories.Add(category);
             await dbContext.SaveChangesAsync();
 
-            var result = new CategoryDto
-            {
-                Id = entity.Id,
-                Name = entity.Name,
-                CreatedAt = entity.CreatedAt,
-                UpdatedAt = entity.UpdatedAt
-            };
-
+            var result = mapper.Map<CategoryDto>(category);
             return CreatedAtAction(nameof(GetCategoryById),
                 new { id = result.Id }, result);
         }
@@ -73,15 +63,10 @@ namespace TaskApp.Controllers
         {
             if (!ModelState.IsValid) return BadRequest(ModelState);
 
-            var entity = await dbContext.Categories.FindAsync(id);
-            if (entity == null) return NotFound();
-
-            entity.Name = dto.Name;
-            entity.UpdatedAt = DateTime.UtcNow;
-
-            dbContext.Categories.Update(entity);
+            var category = mapper.Map<Category>(dto);
+            category.Id = id;
+            dbContext.Categories.Update(category);
             await dbContext.SaveChangesAsync();
-
             return NoContent();
         }
 

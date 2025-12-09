@@ -1,12 +1,15 @@
 using TaskApp.Middlewares;
 using System.IdentityModel.Tokens.Jwt;
 using System.Text;
+using Mapster;
+using MapsterMapper;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using TaskApp.Data;
+using TaskApp.Mapper;
 using TaskApp.Models;
 
 JwtSecurityTokenHandler.DefaultInboundClaimTypeMap.Clear();
@@ -90,6 +93,18 @@ builder.Services.AddSwaggerGen(c =>
     }
   });
 });
+
+// ----------------------------------------------------------
+// Aqui se configura Mapster para el mapeo de objetos
+// ----------------------------------------------------------
+// 1) Registra tus mappings (llena GlobalSettings)
+MappingConfig.RegisterMappings();
+
+// 2) Inyecta ese GlobalSettings en DI como singleton
+builder.Services.AddSingleton(TypeAdapterConfig.GlobalSettings);
+
+// 3) Registra el mapper que usará esa configuración
+builder.Services.AddScoped<IMapper, ServiceMapper>();
 
 var app = builder.Build();
 

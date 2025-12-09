@@ -1,9 +1,10 @@
 using System.Security.Claims;
-using Microsoft.AspNetCore.Http;
+using MapsterMapper;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.JsonWebTokens;
 using TaskApp.Data;
+using TaskApp.DTOs.Common;
 using TaskApp.DTOs.Task;
 using TaskApp.Models;
 
@@ -11,37 +12,62 @@ namespace TaskApp.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    public class TasksController(ApplicationDbContext dbContext) : ControllerBase
+    public class TasksController(ApplicationDbContext dbContext, IMapper mapper) : ControllerBase
     {
         private string GetUserId() => User.FindFirstValue(JwtRegisteredClaimNames.Sub)
                                       ?? throw new UnauthorizedAccessException("Claim 'sub' no presente en el token.");
 
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<TaskItemDto>>> GetAll()
+        public async Task<ActionResult<PagedResultDto<TaskItemDto>>> GetAll(
+            [FromQuery] int pageNumber = 1,
+            [FromQuery] int pageSize = 10,
+            [FromQuery] Status? status = null,
+            [FromQuery] Priority? priority = null,
+            [FromQuery] DateTime? dueFrom = null,
+            [FromQuery] DateTime? dueTo = null)
         {
             var userId = GetUserId();
 
-            var list = await dbContext.TaskItems
+            var query = dbContext.TaskItems
                 .AsNoTracking()
-                .Where(t => t.UserId == userId)
-                .Include(t => t.Category)
+                .Include(x => x.Category)
+                .Where(x => x.UserId == userId);
+
+            // Filtros
+            if (status.HasValue)
+                query = query.Where(x => x.Status == status.Value);
+
+            if (priority.HasValue)
+                query = query.Where(x => x.Priority == priority.Value);
+
+            if (dueFrom.HasValue)
+                query = query.Where(x => x.DueDate >= dueFrom.Value);
+
+            if (dueTo.HasValue)
+                query = query.Where(x => x.DueDate <= dueTo.Value);
+
+            var totalCount = await query.CountAsync();
+
+            var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
+
+            var items = await query
                 .OrderBy(t => t.DueDate)
-                .Select(t => new TaskItemDto
-                {
-                    Id = t.Id,
-                    Title = t.Title,
-                    Description = t.Description,
-                    DueDate = t.DueDate,
-                    Status = t.Status.ToString(),
-                    Priority = t.Priority.ToString(),
-                    CategoryId = t.CategoryId,
-                    CategoryName = t.Category.Name,
-                    CreatedAt = t.CreatedAt,
-                    UpdatedAt = t.UpdatedAt
-                })
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
                 .ToListAsync();
 
-            return Ok(list);
+            var itemsDto = mapper.Map<List<TaskItemDto>>(items);
+
+            var result = new PagedResultDto<TaskItemDto>
+            {
+                Items = itemsDto,
+                PageNumber = pageNumber,
+                PageSize = pageSize,
+                TotalCount = totalCount,
+                TotalPages = totalPages
+            };
+
+            return Ok(result);
         }
 
         // GET api/tasks/{id}
@@ -50,27 +76,16 @@ namespace TaskApp.Controllers
         {
             var userId = GetUserId();
 
-            var t = await dbContext.TaskItems
-                .AsNoTracking()
+            var taskItem = await dbContext.TaskItems
                 .Include(x => x.Category)
-                .Where(x => x.Id == id && x.UserId == userId)
-                .Select(x => new TaskItemDto
-                {
-                    Id = x.Id,
-                    Title = x.Title,
-                    Description = x.Description,
-                    DueDate = x.DueDate,
-                    Status = x.Status.ToString(),
-                    Priority = x.Priority.ToString(),
-                    CategoryId = x.CategoryId,
-                    CategoryName = x.Category.Name,
-                    CreatedAt = x.CreatedAt,
-                    UpdatedAt = x.UpdatedAt
-                })
-                .FirstOrDefaultAsync();
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId);
 
-            if (t == null) return NotFound();
-            return Ok(t);
+            if (taskItem == null) return NotFound();
+
+            var dto = mapper.Map<TaskItemDto>(taskItem);
+
+            return Ok(dto);
         }
 
         // POST api/tasks
@@ -88,38 +103,19 @@ namespace TaskApp.Controllers
             if (cat == null)
                 return BadRequest(new { error = "CategoryId inválido" });
 
-            var entity = new TaskItem
-            {
-                Title = dto.Title,
-                Description = dto.Description,
-                DueDate = dto.DueDate,
-                Status = Status.Pending,
-                Priority = Enum.Parse<Priority>(dto.Priority, true),
-                UserId = userId,
-                CategoryId = dto.CategoryId,
-                CreatedAt = DateTime.UtcNow
-            };
+            // Mapear DTO a entidad
+            var taskItem = mapper.Map<TaskItem>(dto);
+            taskItem.Status = Status.Pending;
+            taskItem.UserId = userId;
 
-            dbContext.TaskItems.Add(entity);
+            dbContext.TaskItems.Add(taskItem);
             await dbContext.SaveChangesAsync();
 
             // Mapear a DTO para la respuesta
-            var result = new TaskItemDto
-            {
-                Id = entity.Id,
-                Title = entity.Title,
-                Description = entity.Description,
-                DueDate = entity.DueDate,
-                Status = entity.Status.ToString(),
-                Priority = entity.Priority.ToString(),
-                CategoryId = entity.CategoryId,
-                CategoryName = cat.Name,
-                CreatedAt = entity.CreatedAt,
-                UpdatedAt = entity.UpdatedAt
-            };
+            var taskItemDto = mapper.Map<TaskItemDto>(taskItem);
 
             return CreatedAtAction(nameof(GetById),
-                new { id = result.Id }, result);
+                new { id = taskItemDto.Id }, taskItemDto);
         }
 
         // PUT api/tasks/{id}
@@ -137,24 +133,17 @@ namespace TaskApp.Controllers
                 return NotFound();
 
             // Verificar categoría
-            var cat = await dbContext.Categories.FindAsync(dto.CategoryId);
-            if (cat == null)
-                return BadRequest(new { error = "CategoryId inválido" });
+            if (dto.CategoryId.HasValue)
+            {
+                var cat = await dbContext.Categories.FindAsync(dto.CategoryId.Value);
+                if (cat == null)
+                    return BadRequest(new { error = "CategoryId inválido" });
+            }
 
-            // Actualizar campos
-            entity.Title = dto.Title ?? entity.Title;
-            entity.Description = dto.Description ?? entity.Description;
-            entity.DueDate = dto.DueDate ?? entity.DueDate;
-            entity.Status = dto.Status != null
-                ? Enum.Parse<Status>(dto.Status, true)
-                : entity.Status;
-            entity.Priority = dto.Priority != null
-                ? Enum.Parse<Priority>(dto.Priority, true)
-                : entity.Priority;
-            entity.CategoryId = dto.CategoryId ?? entity.CategoryId;
+
+            // Mapear solo los cambios que el usuario manda
+            mapper.Map(dto, entity);
             entity.UpdatedAt = DateTime.UtcNow;
-
-            dbContext.TaskItems.Update(entity);
             await dbContext.SaveChangesAsync();
 
             return NoContent();
