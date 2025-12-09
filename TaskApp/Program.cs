@@ -11,6 +11,10 @@ using Microsoft.OpenApi.Models;
 using TaskApp.Data;
 using TaskApp.Mapper;
 using TaskApp.Models;
+using TaskApp.Repositories.CategoryRepositories;
+using TaskApp.Repositories.TaskRepositories;
+using TaskApp.Services.CategoyServices;
+using TaskApp.Services.TaskServices;
 
 JwtSecurityTokenHandler.DefaultInboundClaimTypeMap.Clear();
 
@@ -105,6 +109,19 @@ builder.Services.AddSingleton(TypeAdapterConfig.GlobalSettings);
 
 // 3) Registra el mapper que usará esa configuración
 builder.Services.AddScoped<IMapper, ServiceMapper>();
+
+// ----------------------------------------------------------
+// Repositorios
+// ----------------------------------------------------------
+builder.Services.AddScoped<ICategoryRepository, CategoryRepository>();
+builder.Services.AddScoped<ITaskRepository, TaskRepository>();
+
+// ----------------------------------------------------------
+// Servicios de los repositorios
+// ----------------------------------------------------------
+builder.Services.AddScoped<ICategoryService, CategoryService>();
+builder.Services.AddScoped<ITaskService, TaskService>();
+
 
 var app = builder.Build();
 

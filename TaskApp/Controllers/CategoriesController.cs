@@ -5,38 +5,30 @@ using Microsoft.EntityFrameworkCore;
 using TaskApp.Data;
 using TaskApp.DTOs.Category;
 using TaskApp.Models;
+using TaskApp.Services.CategoyServices;
 
 namespace TaskApp.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
     [Authorize(Roles = "Admin")]
-    public class CategoriesController(ApplicationDbContext dbContext, IMapper mapper) : ControllerBase
+    public class CategoriesController(ICategoryService categoryService) : ControllerBase
     {
         [HttpGet]
         [AllowAnonymous]
         public async Task<ActionResult<IEnumerable<CategoryDto>>> GetCategories()
         {
-            var entities = await dbContext.Categories
-                .AsNoTracking()
-                .OrderBy(c => c.Name)
-                .ToListAsync();
-
-            var dtos = mapper.Map<List<CategoryDto>>(entities);
-            return Ok(dtos);
+            var categories = await categoryService.GetAllAsync();
+            return Ok(categories);
         }
 
 
         [HttpGet("{id:int}")]
         public async Task<ActionResult<CategoryDto>> GetCategoryById(int id)
         {
-            var cat = await dbContext.Categories.AsNoTracking()
-                .Where(c => c.Id == id)
-                .FirstOrDefaultAsync();
-
-            if (cat == null) return NotFound();
-
-            return Ok(cat);
+            var category = await categoryService.GetByIdAsync(id);
+            if (category == null) return NotFound();
+            return Ok(category);
         }
 
 
@@ -46,14 +38,8 @@ namespace TaskApp.Controllers
         {
             if (!ModelState.IsValid) return BadRequest(ModelState);
 
-            var category = mapper.Map<Category>(dto);
-
-            dbContext.Categories.Add(category);
-            await dbContext.SaveChangesAsync();
-
-            var result = mapper.Map<CategoryDto>(category);
-            return CreatedAtAction(nameof(GetCategoryById),
-                new { id = result.Id }, result);
+            var category = await categoryService.CreateAsync(dto);
+            return CreatedAtAction(nameof(GetCategoryById), new { id = category.Id }, category);
         }
 
         // PUT api/categories/{id}
@@ -63,10 +49,8 @@ namespace TaskApp.Controllers
         {
             if (!ModelState.IsValid) return BadRequest(ModelState);
 
-            var category = mapper.Map<Category>(dto);
-            category.Id = id;
-            dbContext.Categories.Update(category);
-            await dbContext.SaveChangesAsync();
+            var updated = await categoryService.UpdateAsync(id, dto);
+            if (!updated) return NotFound();
             return NoContent();
         }
 
@@ -74,12 +58,8 @@ namespace TaskApp.Controllers
         [HttpDelete("{id:int}")]
         public async Task<IActionResult> Delete(int id)
         {
-            var entity = await dbContext.Categories.FindAsync(id);
-            if (entity == null) return NotFound();
-
-            dbContext.Categories.Remove(entity);
-            await dbContext.SaveChangesAsync();
-
+            var deleted = await categoryService.DeleteAsync(id);
+            if (!deleted) return NotFound();
             return NoContent();
         }
     }

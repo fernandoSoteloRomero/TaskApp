@@ -1,18 +1,19 @@
 using System.Security.Claims;
-using MapsterMapper;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.JsonWebTokens;
-using TaskApp.Data;
 using TaskApp.DTOs.Common;
 using TaskApp.DTOs.Task;
 using TaskApp.Models;
+using TaskApp.Services.TaskServices;
 
 namespace TaskApp.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    public class TasksController(ApplicationDbContext dbContext, IMapper mapper) : ControllerBase
+    [Authorize(Roles = "User, Admin")]
+    public class TasksController(ITaskService taskService)
+        : ControllerBase
     {
         private string GetUserId() => User.FindFirstValue(JwtRegisteredClaimNames.Sub)
                                       ?? throw new UnauthorizedAccessException("Claim 'sub' no presente en el token.");
@@ -28,46 +29,16 @@ namespace TaskApp.Controllers
         {
             var userId = GetUserId();
 
-            var query = dbContext.TaskItems
-                .AsNoTracking()
-                .Include(x => x.Category)
-                .Where(x => x.UserId == userId);
+            var paged = await taskService.GetAllAsync(
+                userId,
+                pageNumber,
+                pageSize,
+                status,
+                priority,
+                dueFrom,
+                dueTo);
 
-            // Filtros
-            if (status.HasValue)
-                query = query.Where(x => x.Status == status.Value);
-
-            if (priority.HasValue)
-                query = query.Where(x => x.Priority == priority.Value);
-
-            if (dueFrom.HasValue)
-                query = query.Where(x => x.DueDate >= dueFrom.Value);
-
-            if (dueTo.HasValue)
-                query = query.Where(x => x.DueDate <= dueTo.Value);
-
-            var totalCount = await query.CountAsync();
-
-            var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
-
-            var items = await query
-                .OrderBy(t => t.DueDate)
-                .Skip((pageNumber - 1) * pageSize)
-                .Take(pageSize)
-                .ToListAsync();
-
-            var itemsDto = mapper.Map<List<TaskItemDto>>(items);
-
-            var result = new PagedResultDto<TaskItemDto>
-            {
-                Items = itemsDto,
-                PageNumber = pageNumber,
-                PageSize = pageSize,
-                TotalCount = totalCount,
-                TotalPages = totalPages
-            };
-
-            return Ok(result);
+            return Ok(paged);
         }
 
         // GET api/tasks/{id}
@@ -76,16 +47,10 @@ namespace TaskApp.Controllers
         {
             var userId = GetUserId();
 
-            var taskItem = await dbContext.TaskItems
-                .Include(x => x.Category)
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.Id == id && x.UserId == userId);
-
-            if (taskItem == null) return NotFound();
-
-            var dto = mapper.Map<TaskItemDto>(taskItem);
-
-            return Ok(dto);
+            var taskItemDto = await taskService.GetByIdAsync(userId, id);
+            if (taskItemDto == null)
+                return NotFound();
+            return Ok(taskItemDto);
         }
 
         // POST api/tasks
@@ -98,24 +63,12 @@ namespace TaskApp.Controllers
 
             var userId = GetUserId();
 
-            // Verificar que la categoría existe
-            var cat = await dbContext.Categories.FindAsync(dto.CategoryId);
-            if (cat == null)
-                return BadRequest(new { error = "CategoryId inválido" });
+            var createdTaskItem = await taskService.CreateAsync(userId, dto);
 
-            // Mapear DTO a entidad
-            var taskItem = mapper.Map<TaskItem>(dto);
-            taskItem.Status = Status.Pending;
-            taskItem.UserId = userId;
+            if (createdTaskItem == null)
+                return BadRequest();
 
-            dbContext.TaskItems.Add(taskItem);
-            await dbContext.SaveChangesAsync();
-
-            // Mapear a DTO para la respuesta
-            var taskItemDto = mapper.Map<TaskItemDto>(taskItem);
-
-            return CreatedAtAction(nameof(GetById),
-                new { id = taskItemDto.Id }, taskItemDto);
+            return CreatedAtAction(nameof(GetById), new { id = createdTaskItem.Id }, createdTaskItem);
         }
 
         // PUT api/tasks/{id}
@@ -128,23 +81,9 @@ namespace TaskApp.Controllers
 
             var userId = GetUserId();
 
-            var entity = await dbContext.TaskItems.FindAsync(id);
-            if (entity == null || entity.UserId != userId)
+            var updatedTaskItem = await taskService.UpdateAsync(userId, id, dto);
+            if (!updatedTaskItem)
                 return NotFound();
-
-            // Verificar categoría
-            if (dto.CategoryId.HasValue)
-            {
-                var cat = await dbContext.Categories.FindAsync(dto.CategoryId.Value);
-                if (cat == null)
-                    return BadRequest(new { error = "CategoryId inválido" });
-            }
-
-
-            // Mapear solo los cambios que el usuario manda
-            mapper.Map(dto, entity);
-            entity.UpdatedAt = DateTime.UtcNow;
-            await dbContext.SaveChangesAsync();
 
             return NoContent();
         }
@@ -155,13 +94,9 @@ namespace TaskApp.Controllers
         {
             var userId = GetUserId();
 
-            var entity = await dbContext.TaskItems.FindAsync(id);
-            if (entity == null || entity.UserId != userId)
+            var deleted = await taskService.DeleteAsync(userId, id);
+            if (!deleted)
                 return NotFound();
-
-            dbContext.TaskItems.Remove(entity);
-            await dbContext.SaveChangesAsync();
-
             return NoContent();
         }
     }
