@@ -53,7 +53,7 @@ namespace TaskApp.Controllers
             var user = await userManager.FindByEmailAsync(loginDto.Email);
             if (user == null || !await userManager.CheckPasswordAsync(user, loginDto.Password))
             {
-                return Unauthorized();
+                return Unauthorized("Usuario o contraseña incorrectos");
             }
 
             var tokens = await GenerateTokens(user);

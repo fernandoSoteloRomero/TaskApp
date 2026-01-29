@@ -9,9 +9,9 @@ public class TaskItemUpdateDto
   public DateTime? DueDate { get; set; }
 
   // * Enviamos el enum como texto
-  public string? Status { get; set; } = "Pending";
+  public string? Status { get; set; }
   
-  public string? Priority { get; set; } = "Medium";
+  public string? Priority { get; set; }
 
   // * Relacion con categoria
   public int? CategoryId { get; set; }

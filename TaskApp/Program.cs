@@ -65,7 +65,7 @@ builder.Services.AddAuthentication(options =>
 builder.Services.AddControllers();
 builder.Services.AddCors(o =>
   o.AddPolicy("AllowFrontend", p => p
-    .WithOrigins("http://localhost:3000")
+    .WithOrigins("http://localhost:5173")
     .AllowAnyHeader()
     .AllowAnyMethod()
     .AllowCredentials()));

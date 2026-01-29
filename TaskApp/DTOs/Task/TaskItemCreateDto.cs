@@ -10,7 +10,7 @@ public class TaskItemCreateDto
   public DateTime? DueDate { get; set; }
 
   // * Enviamos el enum como texto
-  public string Status { get; set; }
+  public string? Status { get; set; } = "Pending";
   public string Priority { get; set; } = "Medium";
 
   // * Relacion con categoria
